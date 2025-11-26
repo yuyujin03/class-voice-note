@@ -1,0 +1,7 @@
+{
+  "name": "ProfNote AI v.01.1",
+  "description": "An intelligent lecture recorder that records professor's speech, transcribes it, and generates study notes using Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
