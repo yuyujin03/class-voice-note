@@ -5,7 +5,7 @@ import NoteDetail from './components/NoteDetail';
 import { Recording } from './types';
 import { analyzeLectureAudio } from './services/geminiService';
 import { formatTime, formatDate } from './utils/audioUtils';
-import { saveAudio, deleteAudio } from './services/storageService';
+import { saveAudio, deleteAudio, getAudio } from './services/storageService';
 import { useAudioRecorder } from './hooks/useAudioRecorder';
 
 // Mock UUID if uuid package isn't available
@@ -60,8 +60,6 @@ function App() {
     };
 
     setRecordings(prev => [newRecording, ...prev]);
-    // Optionally stay on recording view or go home. 
-    // Let's go home to show the processing state in list.
     setView('home');
 
     // Persist audio to IndexedDB
@@ -71,20 +69,49 @@ function App() {
       console.error("Failed to save audio to storage:", error);
     }
     
+    processAnalysis(newId, blob);
+  };
+
+  const processAnalysis = async (id: string, blob: Blob) => {
     try {
       const result = await analyzeLectureAudio(blob);
       setRecordings(prev => prev.map(rec => 
-        rec.id === newId 
+        rec.id === id 
           ? { ...rec, status: 'completed', data: result, title: extractTitle(result.summary) || rec.title } 
           : rec
       ));
     } catch (error) {
       console.error(error);
       setRecordings(prev => prev.map(rec => 
-        rec.id === newId 
+        rec.id === id 
           ? { ...rec, status: 'error', errorMessage: 'AI 분석 중 오류가 발생했습니다.' } 
           : rec
       ));
+    }
+  };
+
+  const handleRetryAnalysis = async (id: string) => {
+    const recording = recordings.find(r => r.id === id);
+    if (!recording) return;
+
+    // Set status to processing
+    setRecordings(prev => prev.map(r => r.id === id ? { ...r, status: 'processing', errorMessage: undefined } : r));
+
+    try {
+      // Try to get audio from memory or DB
+      let blob = recording.audioBlob;
+      if (!blob) {
+        blob = await getAudio(id);
+      }
+
+      if (blob) {
+        await processAnalysis(id, blob);
+      } else {
+        throw new Error("오디오 파일을 찾을 수 없습니다.");
+      }
+    } catch (error) {
+      console.error("Retry failed:", error);
+      setRecordings(prev => prev.map(r => r.id === id ? { ...r, status: 'error', errorMessage: '오디오 파일을 불러올 수 없어 분석에 실패했습니다.' } : r));
     }
   };
 
@@ -241,12 +268,10 @@ function App() {
                     <div key={rec.id} className="relative group pr-2">
                       <button
                         onClick={() => {
-                          if (rec.status === 'completed') {
-                            setSelectedId(rec.id);
-                            setView('home');
-                          }
+                          // Allow opening even if error or processing, to show status/retry
+                          setSelectedId(rec.id);
+                          setView('home');
                         }}
-                        disabled={rec.status === 'processing'}
                         className={`w-full text-left p-3 rounded-lg transition-colors flex items-start gap-3 border ${
                           selectedId === rec.id 
                             ? 'bg-indigo-50 border-indigo-100 shadow-sm' 
@@ -330,7 +355,8 @@ function App() {
         ) : selectedRecording ? (
           <NoteDetail 
             recording={selectedRecording} 
-            onBack={() => setSelectedId(null)} 
+            onBack={() => setSelectedId(null)}
+            onRetry={() => handleRetryAnalysis(selectedRecording.id)}
           />
         ) : (
           /* Empty State */
